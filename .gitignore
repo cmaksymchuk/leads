@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local data (backed up to S3; see data/README.md)
+/data/*
+!/data/README.md
