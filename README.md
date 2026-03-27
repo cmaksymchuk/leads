@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LeadFlow
 
-## Getting Started
+Polymorphic lead generation platform: raw ingest → adapters → fingerprint/dedupe → workflow (enrich / score / route) → optional delivery.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Next.js 16 (App Router), TypeScript strict, Tailwind, shadcn/ui
+- Supabase (Postgres) — migrations in `supabase/migrations/`
+- Zod validation
+- Thin Supabase Edge Function (`supabase/functions/process-raw`) forwards to Next.js with HMAC
+
+## Setup
+
+1. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `LEADFLOW_HMAC_SECRET`.
+2. Apply DB migrations (Supabase CLI or SQL editor).
+3. `npm install` && `npm run dev`
+
+## API
+
+- `POST /api/ingest` — body `{ "source_type": "generic_json", "payload": { ... } }` (or `{ "lead": { ... } }`). Stores **only** `raw_records`.
+- `POST /api/internal/process-raw` — HMAC-signed (`X-LeadFlow-Timestamp`, `X-LeadFlow-Signature`), body `{ "rawRecordId": "<uuid>" }`. Used by the Edge Function or manual replay.
+- `POST /api/preview-outreach` — `{ "leadId": "<uuid>" }` returns a **dry-run** message text (no sends).
+
+## Webhook / Edge
+
+See [docs/WEBHOOK.md](docs/WEBHOOK.md).
+
+## Dashboard
+
+Open `/dashboard` for leads, filters, and detail (metadata, events, scores).
+
+## Example ingest (`generic_json`)
+
+```json
+{
+  "source_type": "generic_json",
+  "payload": {
+    "lead_type": "real_estate",
+    "company_name": "Acme Realty",
+    "contact_name": "Jane Doe",
+    "contact_email": "jane@example.com",
+    "city": "Calgary",
+    "region": "AB",
+    "source_url": "https://example.com/listing/1",
+    "metadata": {
+      "signal_type": "listing",
+      "property_value": 450000
+    }
+  }
+}
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
