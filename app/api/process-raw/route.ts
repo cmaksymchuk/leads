@@ -1,17 +1,14 @@
 import { verifyHmacSignature } from "@/lib/auth/hmac";
 import { HMAC_MAX_SKEW_SECONDS } from "@/lib/processing/constants";
-import { processRawRecord } from "@/lib/processing/process-raw-record";
+import { processRawBatch } from "@/lib/processing/process-raw-record";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
-const bodySchema = (raw: unknown): raw is { rawRecordId: string } => {
-  return (
-    typeof raw === "object" &&
-    raw !== null &&
-    "rawRecordId" in raw &&
-    typeof (raw as { rawRecordId: unknown }).rawRecordId === "string" &&
-    (raw as { rawRecordId: string }).rawRecordId.length > 0
-  );
-};
+const bodySchema = z
+  .object({
+    limit: z.number().int().min(1).max(50).optional(),
+  })
+  .strict();
 
 export async function POST(req: NextRequest) {
   const secret = process.env.LEADFLOW_HMAC_SECRET;
@@ -42,23 +39,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: verified.reason }, { status: 401 });
   }
 
-  let parsed: unknown;
+  let parsed: unknown = {};
+  if (bodyText.length > 0) {
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch {
+      return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    }
+  }
+
+  const body = bodySchema.safeParse(parsed);
+  if (!body.success) {
+    return NextResponse.json(
+      { error: "validation_error", details: body.error.flatten() },
+      { status: 400 },
+    );
+  }
+
   try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    const result = await processRawBatch(body.data.limit ?? 10);
+    return NextResponse.json(result, { status: 200 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: "process_failed", message }, { status: 500 });
   }
-
-  if (!bodySchema(parsed)) {
-    return NextResponse.json({ error: "rawRecordId_required" }, { status: 400 });
-  }
-
-  const result = await processRawRecord(parsed.rawRecordId);
-  const status =
-    result.status === "error"
-      ? 500
-      : result.status === "skipped"
-        ? 200
-        : 200;
-  return NextResponse.json(result, { status });
 }

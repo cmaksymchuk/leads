@@ -1,33 +1,18 @@
-import { deliverDestinations } from "@/lib/engine/delivery";
-import { WorkflowManager } from "@/lib/engine/workflow-manager";
 import { getServiceSupabase } from "@/lib/db/server";
-import { computeDedupeKey, computeFingerprint } from "@/lib/dedupe/fingerprint";
-import { getSourceAdapter } from "@/lib/sources/registry";
-import { mergeMetadata } from "@/lib/utils/merge";
-import type {
-  BusinessLead,
-  LeadPayload,
-  RealEstateLead,
-} from "@/types/leads";
+import { normalizeLeadData } from "@/lib/normalization/canada-lead";
+import { canadaMortgagePayloadSchema } from "@/lib/validation/canada-payload";
+import {
+  computeLeadScore,
+  computeMortgageBalance,
+  computePaymentShock,
+  fullMonthsFromNowTo,
+  parsePurchaseDate,
+  renewalDateFromPurchase,
+  shouldPromoteLead,
+} from "@/lib/processing/mortgage";
 import { MAX_RAW_PROCESSING_ATTEMPTS } from "./constants";
 
-const workflow = new WorkflowManager([]);
-
-function withMergedMetadata(
-  lead: LeadPayload,
-  mergedMeta: Record<string, unknown>,
-): LeadPayload {
-  if (lead.lead_type === "real_estate") {
-    return {
-      ...lead,
-      metadata: mergedMeta as RealEstateLead["metadata"],
-    };
-  }
-  return {
-    ...lead,
-    metadata: mergedMeta as BusinessLead["metadata"],
-  };
-}
+const BATCH_LIMIT = 10;
 
 function isUniqueViolation(err: unknown): boolean {
   return (
@@ -38,249 +23,191 @@ function isUniqueViolation(err: unknown): boolean {
   );
 }
 
-export type ProcessResult =
-  | { status: "ok"; leadId: string; rawRecordId: string }
-  | { status: "skipped"; reason: string; rawRecordId: string }
-  | { status: "error"; message: string; rawRecordId: string };
+type RawRow = {
+  id: string;
+  source: string;
+  payload: unknown;
+  processing_attempts?: number;
+};
 
-export async function processRawRecord(rawRecordId: string): Promise<ProcessResult> {
-  const supabase = getServiceSupabase();
+async function finalizeSuccess(supabase: ReturnType<typeof getServiceSupabase>, id: string) {
+  const { error } = await supabase
+    .from("raw_records")
+    .update({
+      processed_at: new Date().toISOString(),
+      processing_lock: false,
+      processing_error: null,
+    })
+    .eq("id", id);
+  if (error) throw error;
+}
 
-  const { data: lockedRows, error: lockErr } = await supabase.rpc(
-    "acquire_raw_record_lock",
-    { p_id: rawRecordId },
-  );
+async function finalizeFailure(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  row: RawRow,
+  message: string,
+) {
+  const attempts = row.processing_attempts ?? 0;
+  const terminal = attempts >= MAX_RAW_PROCESSING_ATTEMPTS;
+  const { error } = await supabase
+    .from("raw_records")
+    .update({
+      processing_lock: false,
+      processing_error: message,
+      processing_attempts: attempts + 1,
+      failed_at: terminal ? new Date().toISOString() : null,
+    })
+    .eq("id", row.id);
+  if (error) throw error;
+}
 
-  if (lockErr) {
-    return {
-      status: "error",
-      message: lockErr.message,
-      rawRecordId,
-    };
+async function processOneRow(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  row: RawRow,
+): Promise<{ promoted: boolean; reason?: string }> {
+  const phoneRaw =
+    typeof row.payload === "object" &&
+    row.payload !== null &&
+    "contact_phone" in row.payload
+      ? String((row.payload as { contact_phone?: unknown }).contact_phone ?? "")
+          .trim()
+      : "";
+
+  if (!phoneRaw) {
+    await finalizeSuccess(supabase, row.id);
+    return { promoted: false, reason: "no_phone" };
   }
 
-  const locked = Array.isArray(lockedRows) ? lockedRows[0] : lockedRows;
-  if (!locked) {
-    const { data: row } = await supabase
-      .from("raw_records")
-      .select("*")
-      .eq("id", rawRecordId)
-      .maybeSingle();
-
-    if (!row) {
-      return { status: "error", message: "raw_record not found", rawRecordId };
-    }
-    if (row.processed_at) {
-      return { status: "skipped", reason: "already_processed", rawRecordId };
-    }
-    if (row.failed_at) {
-      return { status: "skipped", reason: "dead_letter", rawRecordId };
-    }
-    return { status: "skipped", reason: "lock_not_acquired", rawRecordId };
+  const parsed = canadaMortgagePayloadSchema.safeParse(row.payload);
+  if (!parsed.success) {
+    await finalizeSuccess(supabase, row.id);
+    return { promoted: false, reason: "invalid_payload" };
   }
 
-  const raw = locked as {
-    id: string;
-    source_type: string;
-    payload: unknown;
-    processing_attempts: number;
+  const p = parsed.data;
+  const purchaseDate = parsePurchaseDate(p.purchase_date);
+  const renewal = renewalDateFromPurchase(purchaseDate);
+  const monthsToRenewal = fullMonthsFromNowTo(renewal);
+  const mortgageBalance = computeMortgageBalance(p.purchase_price);
+  const paymentShock = computePaymentShock(mortgageBalance);
+  const score = computeLeadScore(monthsToRenewal, paymentShock);
+
+  const norm = normalizeLeadData({
+    address: p.address,
+    city: p.city,
+    postal_code: p.postal_code,
+  });
+
+  if (!shouldPromoteLead(score, monthsToRenewal)) {
+    await finalizeSuccess(supabase, row.id);
+    return { promoted: false, reason: "below_threshold" };
+  }
+
+  const contact_phone = p.contact_phone.trim();
+  const { data: existing, error: exErr } = await supabase
+    .from("leads")
+    .select("id, status")
+    .eq("fingerprint", norm.fingerprint)
+    .maybeSingle();
+
+  if (exErr) throw exErr;
+
+  if (existing?.status === "sold") {
+    await finalizeSuccess(supabase, row.id);
+    return { promoted: false, reason: "lead_already_sold" };
+  }
+
+  const rowData = {
+    fingerprint: norm.fingerprint,
+    contact_phone,
+    address: norm.normalizedAddress,
+    city: norm.normalizedCity,
+    postal_code: norm.normalizedPostalCode,
+    payment_shock: paymentShock,
+    months_to_renewal: monthsToRenewal,
+    score,
+    status: "available" as const,
+    updated_at: new Date().toISOString(),
   };
 
-  try {
-    const adapter = getSourceAdapter(raw.source_type);
-    let lead: LeadPayload = await adapter.normalize(raw.payload);
-    const fingerprint = computeFingerprint(lead);
-    const dedupeKey = computeDedupeKey(lead);
+  let leadId: string;
 
-    const { data: fpRow } = await supabase
+  if (existing) {
+    const { data: updated, error: upErr } = await supabase
       .from("leads")
-      .select("id, metadata")
-      .eq("fingerprint", fingerprint)
-      .maybeSingle();
-
-    let existingId: string | null = fpRow?.id ?? null;
-
-    if (!existingId) {
-      const { data: fuzzyRows, error: fuzzyErr } = await supabase.rpc(
-        "match_leads_fuzzy",
-        {
-          p_region: lead.region,
-          p_company: lead.company_name,
-          p_threshold: 0.35,
-        },
-      );
-      if (!fuzzyErr && fuzzyRows && Array.isArray(fuzzyRows) && fuzzyRows.length > 0) {
-        existingId = (fuzzyRows[0] as { id: string }).id;
-      }
-    }
-
-    const { data: suppressed } = lead.contact_email
-      ? await supabase
-          .from("suppression_list")
-          .select("id")
-          .eq("email", lead.contact_email.toLowerCase())
-          .maybeSingle()
-      : { data: null };
-
-    const initialStatus = suppressed ? "suppressed" : "new";
-
-    let leadId: string;
-
-    if (existingId) {
-      const { data: existing } = await supabase
-        .from("leads")
-        .select("metadata, status")
-        .eq("id", existingId)
-        .single();
-
-      const mergedMeta = mergeMetadata(
-        (existing?.metadata as Record<string, unknown>) ?? {},
-        lead.metadata as unknown as Record<string, unknown>,
-      );
-
-      const { data: updated, error: upErr } = await supabase
-        .from("leads")
-        .update({
-          metadata: mergedMeta,
-          last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          dedupe_key: dedupeKey,
-          contact_name: lead.contact_name,
-          contact_email: lead.contact_email,
-          company_name: lead.company_name,
-          city: lead.city,
-          region: lead.region,
-          source_url: lead.source_url || "",
-        })
-        .eq("id", existingId)
-        .select("id")
-        .single();
-
-      if (upErr) throw upErr;
-      leadId = updated!.id;
-      lead = withMergedMetadata(lead, mergedMeta);
-    } else {
-      const { data: inserted, error: insErr } = await supabase
-        .from("leads")
-        .insert({
-          lead_type: lead.lead_type,
-          status: initialStatus,
-          fingerprint,
-          fingerprint_version: 1,
-          company_name: lead.company_name,
-          contact_name: lead.contact_name,
-          contact_email: lead.contact_email,
-          city: lead.city,
-          region: lead.region,
-          source_url: lead.source_url || "",
-          metadata: lead.metadata,
-          dedupe_key: dedupeKey,
-          consent_basis: lead.consent_basis ?? null,
-          consent_expiry: lead.consent_expiry ?? null,
-          last_seen_at: new Date().toISOString(),
-          first_seen_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
-
-      if (insErr) {
-        if (isUniqueViolation(insErr)) {
-          const { data: again } = await supabase
-            .from("leads")
-            .select("id, metadata")
-            .eq("fingerprint", fingerprint)
-            .maybeSingle();
-          if (!again?.id) throw insErr;
-          const mergedRace = mergeMetadata(
-            (again.metadata as Record<string, unknown>) ?? {},
-            lead.metadata as unknown as Record<string, unknown>,
-          );
-          const { data: updatedRace, error: raceErr } = await supabase
-            .from("leads")
-            .update({
-              metadata: mergedRace,
-              last_seen_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              dedupe_key: dedupeKey,
-              contact_name: lead.contact_name,
-              contact_email: lead.contact_email,
-              company_name: lead.company_name,
-              city: lead.city,
-              region: lead.region,
-              source_url: lead.source_url || "",
-            })
-            .eq("id", again.id)
-            .select("id")
-            .single();
-          if (raceErr) throw raceErr;
-          leadId = updatedRace!.id;
-          lead = withMergedMetadata(lead, mergedRace);
-        } else {
-          throw insErr;
-        }
-      } else {
-        leadId = inserted!.id;
-      }
-    }
-
-    const wf = await workflow.processLead(lead);
-
-    await supabase
+      .update(rowData)
+      .eq("id", existing.id)
+      .select("id")
+      .single();
+    if (upErr) throw upErr;
+    leadId = updated!.id;
+  } else {
+    const { data: inserted, error: insErr } = await supabase
       .from("leads")
-      .update({
-        metadata: wf.lead.metadata as unknown as Record<string, unknown>,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", leadId);
+      .insert(rowData)
+      .select("id")
+      .single();
+    if (insErr) throw insErr;
+    leadId = inserted!.id;
 
     const { error: evErr } = await supabase.from("lead_events").insert({
       lead_id: leadId,
-      event_type: "raw_record.processed",
-      payload: {
-        raw_record_id: rawRecordId,
-        source_type: raw.source_type,
-      },
-      idempotency_key: `raw:${rawRecordId}`,
+      event_type: "created",
+      payload: { raw_record_id: row.id, source: row.source },
+      idempotency_key: `promote:${row.id}`,
     });
     if (evErr && !isUniqueViolation(evErr)) throw evErr;
-
-    const { error: scErr } = await supabase.from("lead_scores").insert({
-      lead_id: leadId,
-      score: wf.score.score,
-      reasoning: wf.score.reasoning,
-      idempotency_key: `score:${rawRecordId}`,
-    });
-    if (scErr && !isUniqueViolation(scErr)) throw scErr;
-
-    const dryRun = process.env.LEADFLOW_DRY_RUN === "true";
-    await deliverDestinations(leadId, wf.destinations, { dryRun });
-
-    const { error: doneErr } = await supabase
-      .from("raw_records")
-      .update({
-        processed_at: new Date().toISOString(),
-        processing_lock: false,
-        processing_error: null,
-      })
-      .eq("id", rawRecordId);
-
-    if (doneErr) throw doneErr;
-
-    return { status: "ok", leadId, rawRecordId };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    const attempts = raw.processing_attempts;
-    const terminal = attempts >= MAX_RAW_PROCESSING_ATTEMPTS;
-
-    await supabase
-      .from("raw_records")
-      .update({
-        processing_lock: false,
-        processing_error: message,
-        failed_at: terminal ? new Date().toISOString() : null,
-      })
-      .eq("id", rawRecordId);
-
-    return { status: "error", message, rawRecordId };
   }
+
+  await finalizeSuccess(supabase, row.id);
+  return { promoted: true };
+}
+
+export type ProcessBatchResult = {
+  claimed: number;
+  promoted: number;
+  skipped: number;
+  errors: Array<{ rawRecordId: string; message: string }>;
+};
+
+export async function processRawBatch(
+  limit: number = BATCH_LIMIT,
+): Promise<ProcessBatchResult> {
+  const supabase = getServiceSupabase();
+  const { data: claimed, error: claimErr } = await supabase.rpc(
+    "claim_raw_records_for_processing",
+    { p_limit: limit },
+  );
+
+  if (claimErr) {
+    throw new Error(claimErr.message);
+  }
+
+  const rows = (claimed ?? []) as RawRow[];
+  let promoted = 0;
+  let skipped = 0;
+  const errors: ProcessBatchResult["errors"] = [];
+
+  for (const row of rows) {
+    try {
+      const r = await processOneRow(supabase, row);
+      if (r.promoted) promoted += 1;
+      else skipped += 1;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      errors.push({ rawRecordId: row.id, message });
+      try {
+        await finalizeFailure(supabase, row, message);
+      } catch {
+        // best-effort
+      }
+    }
+  }
+
+  return {
+    claimed: rows.length,
+    promoted,
+    skipped,
+    errors,
+  };
 }

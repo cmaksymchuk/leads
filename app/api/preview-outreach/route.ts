@@ -42,8 +42,8 @@ export async function POST(req: NextRequest) {
     "Reply STOP to opt out. This is a simulated message — not sent.";
 
   const preview = [
-    `To: ${lead.contact_name} (${lead.contact_email ?? "no email"})`,
-    `Company: ${lead.company_name}`,
+    `To: ${String(lead.contact_phone ?? "")}`,
+    `Address: ${String(lead.address ?? "")}, ${String(lead.city ?? "")} ${String(lead.postal_code ?? "")}`,
     "",
     "[Simulated outreach body — not sent]",
     "",

@@ -7,7 +7,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
 export const metadata: Metadata = {
-  title: "LeadFlow — Dashboard",
+  title: "LeadFlow Canada — Dashboard",
 };
 
 export default async function DashboardPage({
@@ -16,8 +16,6 @@ export default async function DashboardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const lead_type =
-    typeof sp.lead_type === "string" ? sp.lead_type : undefined;
   const status = typeof sp.status === "string" ? sp.status : undefined;
   const min_score_raw = sp.min_score;
   const min_score =
@@ -28,7 +26,6 @@ export default async function DashboardPage({
   const detailId = typeof sp.detail === "string" ? sp.detail : undefined;
 
   const leads = await loadLeads({
-    lead_type,
     status,
     min_score:
       min_score !== undefined && !Number.isNaN(min_score)
@@ -42,9 +39,11 @@ export default async function DashboardPage({
   return (
     <div className="bg-background text-foreground mx-auto flex min-h-full max-w-6xl flex-col gap-8 px-4 py-10">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">LeadFlow</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          LeadFlow Canada
+        </h1>
         <p className="text-muted-foreground text-sm">
-          Polymorphic leads, scores, and events.
+          Callable renewal leads — address, shock, score, phone.
         </p>
       </header>
 

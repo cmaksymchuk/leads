@@ -18,14 +18,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { source_type, external_id, payload } = parsed.data;
+  const { source, external_id, payload } = parsed.data;
 
   try {
     const supabase = getServiceSupabase();
     const { data, error } = await supabase
       .from("raw_records")
       .insert({
-        source_type,
+        source: source,
         external_id: external_id ?? null,
         payload: payload as object,
       })

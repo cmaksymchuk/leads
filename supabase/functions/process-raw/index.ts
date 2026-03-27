@@ -15,8 +15,8 @@ async function hmacSha256Hex(secret: string, message: string): Promise<string> {
 }
 
 /**
- * Thin adapter: Database Webhook (raw_records INSERT) → HMAC-signed POST to Next.js.
- * Configure `INTERNAL_PROCESS_URL` to `https://<your-app>/api/internal/process-raw`.
+ * Database Webhook (raw_records INSERT) → HMAC-signed POST to Next.js batch processor.
+ * Configure `INTERNAL_PROCESS_URL` to `https://<your-app>/api/process-raw`.
  */
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -27,36 +27,15 @@ Deno.serve(async (req) => {
   const internalUrl = Deno.env.get("INTERNAL_PROCESS_URL");
   if (!hmacSecret || !internalUrl) {
     return new Response(
-      JSON.stringify({ error: "misconfigured", need: ["LEADFLOW_HMAC_SECRET", "INTERNAL_PROCESS_URL"] }),
+      JSON.stringify({
+        error: "misconfigured",
+        need: ["LEADFLOW_HMAC_SECRET", "INTERNAL_PROCESS_URL"],
+      }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
 
-  let payload: {
-    record?: { id?: string };
-    id?: string;
-    type?: string;
-    table?: string;
-  };
-  try {
-    payload = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "invalid_json" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const recordId = payload.record?.id ?? payload.id;
-  if (!recordId) {
-    return new Response(JSON.stringify({ error: "missing_record_id", payload }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
   const bodyObj = {
-    rawRecordId: recordId,
     webhookDeliveryId: crypto.randomUUID(),
   };
   const body = JSON.stringify(bodyObj);
