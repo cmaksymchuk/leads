@@ -8,6 +8,8 @@ export const canadaMortgagePayloadSchema = z.object({
   address: z.string().min(1),
   city: z.string().min(1),
   postal_code: z.string().min(1),
+  /** Optional 2-letter province/territory override (e.g. ON, BC). */
+  region: z.string().length(2).optional(),
 });
 
 export type CanadaMortgagePayload = z.infer<typeof canadaMortgagePayloadSchema>;

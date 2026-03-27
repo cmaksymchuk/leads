@@ -1,5 +1,12 @@
+import {
+  apiErrorJson,
+  apiJson,
+  logger,
+  type MonitoringContext,
+  withMonitoring,
+} from "@/lib/api";
 import { getServiceSupabase } from "@/lib/db/server";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -10,19 +17,22 @@ const bodySchema = z.object({
  * Dry-run outreach preview: does not send email or call webhooks.
  * Appends compliance footer from env when set.
  */
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest, ctx: MonitoringContext) {
+  const { requestId } = ctx;
+
   let json: unknown;
   try {
     json = await req.json();
   } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    return apiErrorJson({ error: "invalid_json" }, 400, requestId);
   }
 
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json(
+    return apiErrorJson(
       { error: "validation_error", details: parsed.error.flatten() },
-      { status: 400 },
+      400,
+      requestId,
     );
   }
 
@@ -33,8 +43,18 @@ export async function POST(req: NextRequest) {
     .eq("id", parsed.data.leadId)
     .maybeSingle();
 
-  if (error || !lead) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (error) {
+    logger.error("preview_lead_fetch_failed", {
+      route: "/api/preview-outreach",
+      flow: "preview",
+      requestId,
+      code: error.code,
+    });
+    return apiErrorJson({ error: "server_error" }, 500, requestId);
+  }
+
+  if (!lead) {
+    return apiErrorJson({ error: "not_found" }, 404, requestId);
   }
 
   const footer =
@@ -50,5 +70,10 @@ export async function POST(req: NextRequest) {
     footer,
   ].join("\n");
 
-  return NextResponse.json({ dryRun: true, preview });
+  return apiJson({ dryRun: true, preview }, 200, requestId);
 }
+
+export const POST = withMonitoring(handlePost, {
+  route: "/api/preview-outreach",
+  flow: "preview",
+});

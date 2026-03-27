@@ -1,0 +1,92 @@
+# LeadFlow — Cursor Rules
+
+## What this project is
+A lead generation platform. Leads are ingested from external sources, validated,
+scored, and surfaced to buyers. The pipeline is the product; the vertical
+(mortgage, insurance, etc.) is configurable.
+
+## Naming rules — enforce always
+- Never use country names in type names, component names, file names, or copy.
+  Wrong: CanadaLeadRow, canada-payload.ts, "Canadian mortgage leads"
+  Right: LeadRow, mortgage-payload.ts, "mortgage leads"
+- Vertical-specific logic lives in lib/processing/verticals/
+- Types are market-agnostic. Market/country is a data field, not a type name.
+
+## Domain model
+source → raw_record → (processing) → lead → handoff
+
+- raw_records: append-only. Never mutate payload. Processing state lives here.
+- leads: promoted records only. A lead exists because it passed qualification.
+- handoff: when a lead is sold/delivered to a buyer.
+- Source attribution on a raw_record is set at ingest and is immutable.
+- Qualification scores are always computed server-side, never client-side.
+
+## Silent failure rules — the most important rules in this file
+The processing pipeline has three failure modes. All three must produce
+observable output. Never write code that silently swallows these:
+
+1. Soft skips (invalid_payload, no_phone, below_threshold, already_sold):
+   - Must store a skip_reason on the raw_record row. Not just skipped++.
+   - Must be individually retrievable. "N rows skipped" is not enough.
+
+2. Hard failures (thrown errors in processOneRow):
+   - Must write processing_error to the raw_record row. (Already done.)
+   - Must also emit a structured log entry with rawRecordId and error message.
+   - finalizeFailure double-failures must not be swallowed. Re-throw or log.
+
+3. Batch-level failures (RPC errors, claim failures):
+   - Must emit a structured log entry before returning 500.
+   - The log must include: timestamp, batch size attempted, error message.
+
+Structured logging means: console.error(JSON.stringify({...})) at minimum today.
+When Sentry is added, these become Sentry.captureException() calls with context.
+Never use console.log for errors. Only console.error with a JSON payload.
+
+## API routes
+- Every route in app/api/ must be wrapped in withMonitoring().
+- withMonitoring() is in lib/api.ts. Use it. Do not inline its logic.
+- Every route must declare a flow tag:
+  lead-capture | processing | qualification | handoff | admin | preview
+- A catch block that only calls console.log, or is empty, is a build error.
+
+## Supabase
+- supabase db push --linked --include-all. Never push individual migrations.
+- No seed data in migration files. Seed data in supabase/seed.sql.
+- Always set Cache-Control: no-store on Supabase clients.
+- Generated types in lib/database.types.ts. Run db:gen-types after every migration.
+- RLS: no anon access. Service role on the server only.
+
+## Validation
+- Zod for all external input. No exceptions.
+- Zod schemas live in lib/validation/. One file per vertical/context.
+- A Zod parse failure is not a success. Do not call finalizeSuccess on parse failure.
+  (This is a known bug in the current codebase. Fix it when you touch that path.)
+
+## Testing
+- Every new lib/ function gets a unit test in the same commit.
+- Every new API route gets an integration test in the same commit.
+- npm test must pass before every commit.
+- Tests are reported pass/fail only. No console noise in test output.
+
+## TypeScript
+- No `any` without a comment explaining why it cannot be avoided.
+- Strict mode is on. Do not work around it.
+
+## Documentation
+- New migration → update schema section of docs/STATE.md.
+- New env var → add to docs/env-vars.md and .env.example.
+- Non-obvious decision → create ADR in docs/adr/.
+- Do not update docs that did not change.
+
+## AI assistant behavior
+- Read before editing. Explore relevant files first.
+- Edit minimally. Change only what the task requires.
+- Do not refactor code you were not asked to refactor.
+- Do not rename things without being asked.
+- Exception: if you encounter a silent catch block or a finalizeSuccess-on-parse-failure
+  while working on adjacent code, flag it as a finding. Do not fix it silently.
+- When adding an API route: add withMonitoring() automatically.
+- When adding a lib/ function: add its test automatically.
+- Before any DB command: state what it will do and wait for confirmation.
+- Never push to prod without explicit instruction.
+- Never use country names in generated code, types, or copy.

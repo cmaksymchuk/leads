@@ -1,7 +1,14 @@
 import { verifyHmacSignature } from "@/lib/auth/hmac";
+import {
+  apiErrorJson,
+  apiJson,
+  logger,
+  type MonitoringContext,
+  withMonitoring,
+} from "@/lib/api";
 import { HMAC_MAX_SKEW_SECONDS } from "@/lib/processing/constants";
 import { processRawBatch } from "@/lib/processing/process-raw-record";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 
 const bodySchema = z
@@ -10,12 +17,21 @@ const bodySchema = z
   })
   .strict();
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest, ctx: MonitoringContext) {
+  const { requestId } = ctx;
+
   const secret = process.env.LEADFLOW_HMAC_SECRET;
   if (!secret) {
-    return NextResponse.json(
+    logger.error("process_raw_misconfigured", {
+      route: "/api/process-raw",
+      flow: "processing",
+      requestId,
+      detail: "LEADFLOW_HMAC_SECRET",
+    });
+    return apiErrorJson(
       { error: "server_misconfigured", detail: "LEADFLOW_HMAC_SECRET" },
-      { status: 500 },
+      500,
+      requestId,
     );
   }
 
@@ -24,7 +40,7 @@ export async function POST(req: NextRequest) {
   const sig = req.headers.get("x-leadflow-signature");
 
   if (!ts || !sig) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return apiErrorJson({ error: "unauthorized" }, 401, requestId);
   }
 
   const verified = verifyHmacSignature({
@@ -36,7 +52,7 @@ export async function POST(req: NextRequest) {
   });
 
   if (!verified.ok) {
-    return NextResponse.json({ error: verified.reason }, { status: 401 });
+    return apiErrorJson({ error: verified.reason }, 401, requestId);
   }
 
   let parsed: unknown = {};
@@ -44,23 +60,58 @@ export async function POST(req: NextRequest) {
     try {
       parsed = JSON.parse(bodyText);
     } catch {
-      return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+      return apiErrorJson({ error: "invalid_json" }, 400, requestId);
     }
   }
 
   const body = bodySchema.safeParse(parsed);
   if (!body.success) {
-    return NextResponse.json(
+    return apiErrorJson(
       { error: "validation_error", details: body.error.flatten() },
-      { status: 400 },
+      400,
+      requestId,
     );
   }
 
+  const batchLimit = body.data.limit ?? 10;
+
   try {
-    const result = await processRawBatch(body.data.limit ?? 10);
-    return NextResponse.json(result, { status: 200 });
+    const result = await processRawBatch(batchLimit);
+    if (result.claimed > 0 || result.errors.length > 0) {
+      logger.info("process_raw_batch_complete", {
+        route: "/api/process-raw",
+        flow: "processing",
+        requestId,
+        claimed: result.claimed,
+        promoted: result.promoted,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      });
+    }
+    return apiJson(
+      {
+        claimed: result.claimed,
+        promoted: result.promoted,
+        skipped: result.skipped,
+        errors: result.errors,
+      },
+      200,
+      requestId,
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: "process_failed", message }, { status: 500 });
+    logger.error("process_raw_batch_failed", {
+      route: "/api/process-raw",
+      flow: "processing",
+      requestId,
+      batchSizeAttempted: batchLimit,
+      error: message,
+    });
+    return apiErrorJson({ error: "process_failed", message }, 500, requestId);
   }
 }
+
+export const POST = withMonitoring(handlePost, {
+  route: "/api/process-raw",
+  flow: "processing",
+});
