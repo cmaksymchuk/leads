@@ -10,6 +10,8 @@ export interface CanadaLeadRow {
   address: string;
   city: string;
   postal_code: string;
+  /** Province/territory code (e.g. ON, BC). */
+  region: string;
   payment_shock: number;
   months_to_renewal: number;
   score: number;

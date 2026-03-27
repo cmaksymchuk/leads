@@ -3,6 +3,7 @@ import { getServiceSupabase } from "@/lib/db/server";
 export interface LeadListRow {
   id: string;
   status: string;
+  region: string;
   address: string;
   city: string;
   postal_code: string;
@@ -15,6 +16,7 @@ export interface LeadListRow {
 
 export async function loadLeads(filters: {
   status?: string;
+  region?: string;
   min_score?: number;
 }): Promise<LeadListRow[]> {
   const supabase = getServiceSupabase();
@@ -24,6 +26,7 @@ export async function loadLeads(filters: {
       `
       id,
       status,
+      region,
       address,
       city,
       postal_code,
@@ -39,6 +42,9 @@ export async function loadLeads(filters: {
 
   if (filters.status) {
     q = q.eq("status", filters.status);
+  }
+  if (filters.region) {
+    q = q.eq("region", filters.region);
   }
 
   const { data, error } = await q;

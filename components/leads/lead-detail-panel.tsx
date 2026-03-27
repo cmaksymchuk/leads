@@ -41,6 +41,10 @@ export function LeadDetailPanel({ detail }: { detail: LeadDetailBundle }) {
         </div>
         <dl className="grid gap-2 text-sm">
           <div className="flex justify-between gap-4">
+            <dt className="text-muted-foreground">Province</dt>
+            <dd className="font-mono">{String(lead.region ?? "")}</dd>
+          </div>
+          <div className="flex justify-between gap-4">
             <dt className="text-muted-foreground">City</dt>
             <dd>{String(lead.city ?? "")}</dd>
           </div>

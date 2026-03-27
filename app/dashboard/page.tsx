@@ -16,7 +16,12 @@ export default async function DashboardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const status = typeof sp.status === "string" ? sp.status : undefined;
+  const statusRaw = typeof sp.status === "string" ? sp.status : undefined;
+  const status =
+    statusRaw && statusRaw !== "all" ? statusRaw : undefined;
+  const regionRaw = typeof sp.region === "string" ? sp.region : undefined;
+  const region =
+    regionRaw && regionRaw !== "all" ? regionRaw : undefined;
   const min_score_raw = sp.min_score;
   const min_score =
     typeof min_score_raw === "string" && min_score_raw.length > 0
@@ -25,8 +30,19 @@ export default async function DashboardPage({
 
   const detailId = typeof sp.detail === "string" ? sp.detail : undefined;
 
+  const preserved = new URLSearchParams();
+  if (region) preserved.set("region", region);
+  if (status && status !== "all") preserved.set("status", status);
+  if (
+    min_score !== undefined &&
+    !Number.isNaN(min_score)
+  ) {
+    preserved.set("min_score", String(min_score));
+  }
+
   const leads = await loadLeads({
     status,
+    region,
     min_score:
       min_score !== undefined && !Number.isNaN(min_score)
         ? min_score
@@ -52,7 +68,10 @@ export default async function DashboardPage({
       </Suspense>
 
       <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
-        <LeadsTable leads={leads} />
+        <LeadsTable
+          leads={leads}
+          queryPreserved={preserved.toString()}
+        />
         {detail && <LeadDetailPanel detail={detail} />}
       </div>
     </div>

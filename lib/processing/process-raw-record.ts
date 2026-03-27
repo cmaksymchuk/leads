@@ -1,5 +1,8 @@
 import { getServiceSupabase } from "@/lib/db/server";
-import { normalizeLeadData } from "@/lib/normalization/canada-lead";
+import {
+  normalizeLeadData,
+  resolveRegion,
+} from "@/lib/normalization/canada-lead";
 import { canadaMortgagePayloadSchema } from "@/lib/validation/canada-payload";
 import {
   computeLeadScore,
@@ -30,15 +33,20 @@ type RawRow = {
   processing_attempts?: number;
 };
 
-async function finalizeSuccess(supabase: ReturnType<typeof getServiceSupabase>, id: string) {
-  const { error } = await supabase
-    .from("raw_records")
-    .update({
-      processed_at: new Date().toISOString(),
-      processing_lock: false,
-      processing_error: null,
-    })
-    .eq("id", id);
+async function finalizeSuccess(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  id: string,
+  opts?: { region?: string },
+) {
+  const patch: Record<string, unknown> = {
+    processed_at: new Date().toISOString(),
+    processing_lock: false,
+    processing_error: null,
+  };
+  if (opts?.region !== undefined) {
+    patch.region = opts.region;
+  }
+  const { error } = await supabase.from("raw_records").update(patch).eq("id", id);
   if (error) throw error;
 }
 
@@ -85,6 +93,11 @@ async function processOneRow(
   }
 
   const p = parsed.data;
+  const resolvedRegion = resolveRegion({
+    postal_code: p.postal_code,
+    region: p.region,
+  });
+
   const purchaseDate = parsePurchaseDate(p.purchase_date);
   const renewal = renewalDateFromPurchase(purchaseDate);
   const monthsToRenewal = fullMonthsFromNowTo(renewal);
@@ -96,10 +109,11 @@ async function processOneRow(
     address: p.address,
     city: p.city,
     postal_code: p.postal_code,
+    region: resolvedRegion,
   });
 
   if (!shouldPromoteLead(score, monthsToRenewal)) {
-    await finalizeSuccess(supabase, row.id);
+    await finalizeSuccess(supabase, row.id, { region: resolvedRegion });
     return { promoted: false, reason: "below_threshold" };
   }
 
@@ -113,7 +127,7 @@ async function processOneRow(
   if (exErr) throw exErr;
 
   if (existing?.status === "sold") {
-    await finalizeSuccess(supabase, row.id);
+    await finalizeSuccess(supabase, row.id, { region: resolvedRegion });
     return { promoted: false, reason: "lead_already_sold" };
   }
 
@@ -123,6 +137,7 @@ async function processOneRow(
     address: norm.normalizedAddress,
     city: norm.normalizedCity,
     postal_code: norm.normalizedPostalCode,
+    region: norm.region,
     payment_shock: paymentShock,
     months_to_renewal: monthsToRenewal,
     score,
@@ -159,7 +174,7 @@ async function processOneRow(
     if (evErr && !isUniqueViolation(evErr)) throw evErr;
   }
 
-  await finalizeSuccess(supabase, row.id);
+  await finalizeSuccess(supabase, row.id, { region: resolvedRegion });
   return { promoted: true };
 }
 

@@ -19,7 +19,19 @@ function formatMoney(n: number): string {
   }).format(n);
 }
 
-export function LeadsTable({ leads }: { leads: LeadListRow[] }) {
+function detailHref(leadId: string, queryPreserved: string): string {
+  const p = new URLSearchParams(queryPreserved);
+  p.set("detail", leadId);
+  return `/dashboard?${p.toString()}`;
+}
+
+export function LeadsTable({
+  leads,
+  queryPreserved = "",
+}: {
+  leads: LeadListRow[];
+  queryPreserved?: string;
+}) {
   if (leads.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
@@ -38,6 +50,7 @@ export function LeadsTable({ leads }: { leads: LeadListRow[] }) {
         <TableRow>
           <TableHead>Address</TableHead>
           <TableHead>City</TableHead>
+          <TableHead>Province</TableHead>
           <TableHead>Payment shock</TableHead>
           <TableHead>Months to renewal</TableHead>
           <TableHead>Score</TableHead>
@@ -53,6 +66,7 @@ export function LeadsTable({ leads }: { leads: LeadListRow[] }) {
               {l.address}
             </TableCell>
             <TableCell>{l.city}</TableCell>
+            <TableCell className="font-mono text-xs">{l.region}</TableCell>
             <TableCell>{formatMoney(Number(l.payment_shock))}</TableCell>
             <TableCell>{l.months_to_renewal}</TableCell>
             <TableCell>{l.score}</TableCell>
@@ -67,7 +81,7 @@ export function LeadsTable({ leads }: { leads: LeadListRow[] }) {
                 ) : null}
                 <Link
                   className="text-primary inline-flex items-center text-sm underline"
-                  href={`/dashboard?detail=${l.id}`}
+                  href={detailHref(l.id, queryPreserved)}
                   scroll={false}
                 >
                   Detail
