@@ -2,6 +2,8 @@
 
 Thin client for LeadFlow: it maps a Manitoba Roll Entry CSV, filters to a small geographic slice, writes a candidate file for **manual** enrichment, then POSTs enriched rows to the app’s **`/api/ingest`** endpoint. Scoring, dedupe, and processing stay in the Next.js + Supabase pipeline.
 
+**The CSV on disk is never modified** — pass `--input` to the file as downloaded.
+
 ## Setup
 
 From this directory:
@@ -31,12 +33,16 @@ Use your deployed origin in production (same path: `/api/ingest`).
 
 ### 1. Generate candidates (default)
 
-Point `--input` at a Manitoba Roll Entry CSV. The script maps columns, normalizes postal codes, keeps **Winnipeg** rows whose postal code starts with **R3Y**, and writes up to **20** rows to:
+Point `--input` at a Manitoba Roll Entry CSV (UTF-8, with or without BOM). The script:
 
-**`/tmp/mb_candidates.csv`**
+- Resolves **address** / **city** / **postal** columns **case-insensitively** (e.g. `Property_Address`, `Muni_Name_With_Typ`).
+- Adds an empty `postal_code` column if the file has no postal column.
+- Keeps **City of Brandon** rows: `Muni_Name_With_Typ` matching `brandon (city)`, or `Municipality` containing `city of brandon`.
+- If the file has **any** postal codes: also requires **R7A / R7B / R7C** FSA prefix (after normalizing spaces).
+- Writes up to **20** rows to **`/tmp/mb_candidates.csv`**.
 
 ```bash
-python ingest_mb_roll_entry.py --input /path/to/roll.csv
+python ingest_mb_roll_entry.py --input /path/to/ROLL_ENTRY.csv
 ```
 
 Fill in **`contact_phone`**, **`purchase_price`**, and **`purchase_date`** in that file (or save a copy elsewhere). This dataset does not reliably include purchase dates; do not treat assessment roll year as purchase date.
@@ -62,20 +68,20 @@ Missing or empty required fields cause a **non-zero exit** with an error message
 
 ## Source column mapping (candidate mode)
 
-From Manitoba Open Data roll entry fields:
+Typical Manitoba roll columns (any common casing):
 
-- `PROPERTY_ADDRESS` → `address`
-- `MUNI_NAME_WITH_TYP` → `city`
-- `POSTAL_CODE` → `postal_code`
+- `Property_Address` / `PROPERTY_ADDRESS` → `address`
+- `Muni_Name_With_Typ` / `MUNI_NAME_WITH_TYP` → `city` (optional fallback: `Municipality` for lookup only in filters)
+- `POSTAL_CODE` / `Postal_Code` → `postal_code` (optional; many extracts omit it)
 
-If your file already uses `address`, `city`, and `postal_code`, mapping is optional.
+If your file already uses `address`, `city`, and `postal_code`, those are used as-is.
 
 ## Payload to the API
 
 Each row is sent as JSON:
 
 - `source`: `mb_roll_entry_v1`
-- `external_id`: SHA-256 of `"{address}_{postal_code}"`
+- `external_id`: SHA-256 of `address|postal` (and `Roll_No` when postal is empty in source)
 - `payload`: matches the app’s ingest schema (`address`, `city`, `postal_code`, `contact_phone`, `purchase_price`, `purchase_date`)
 
 After ingest, run your usual **`/api/process-raw`** (or batch job) so `raw_records` become leads.
@@ -84,4 +90,4 @@ After ingest, run your usual **`/api/process-raw`** (or batch job) so `raw_recor
 
 - **`LEADFLOW_API_URL is not set`**: define it in repo-root `.env` or `.env.local`.
 - **`python-dotenv could not parse …`**: fix the reported line in `.env` / `.env.local` (syntax issue), not in this script.
-- **No rows after filter**: confirm Winnipeg + R3Y data and column names in the source CSV.
+- **No rows after filter**: the extract may not include **City of Brandon** rows. Use a province-wide roll file that includes Brandon, or confirm `Muni_Name_With_Typ` / `Municipality` values.

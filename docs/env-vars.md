@@ -2,6 +2,7 @@
 
 | Variable | Required | Environments | Purpose |
 |---|---|---|---|
+| NEXT_PUBLIC_CHAT_MODE | No | All | Lead capture UI: `scripted` (default step flow) or `ai` (stub; posts to `/api/capture/chat`). |
 | NEXT_PUBLIC_SUPABASE_URL | Yes | All | Supabase project URL |
 | SUPABASE_SERVICE_ROLE_KEY | Yes | Server only | Supabase admin access |
 | LEADFLOW_HMAC_SECRET | Yes | All | Signs /api/process-raw requests |

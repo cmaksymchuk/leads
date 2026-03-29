@@ -1,21 +1,13 @@
+import { logger } from "@/lib/api";
 import { getServiceSupabase } from "@/lib/db/server";
+import { resolveVerticalHandler } from "@/lib/verticals/registry";
 import {
-  normalizeLeadData,
-  resolveRegion,
-} from "@/lib/normalization/canada-lead";
-import { canadaMortgagePayloadSchema } from "@/lib/validation/canada-payload";
-import {
-  computeLeadScore,
-  computeMortgageBalance,
-  computePaymentShock,
-  fullMonthsFromNowTo,
-  parsePurchaseDate,
-  renewalDateFromPurchase,
-  shouldPromoteLead,
-} from "@/lib/processing/mortgage";
-import { MAX_RAW_PROCESSING_ATTEMPTS } from "./constants";
-
-const BATCH_LIMIT = 10;
+  SKIP_REASON_LEAD_ALREADY_SOLD,
+  SKIP_REASON_UNKNOWN_VERTICAL,
+} from "@/lib/verticals/skip-reasons";
+import type { RawRecordRow } from "@/lib/verticals/types";
+import { LEAD_STATUS_SOLD } from "@/types/leads";
+import { LEAD_EVENT_TYPE_CREATED, MAX_RAW_PROCESSING_ATTEMPTS } from "./constants";
 
 function isUniqueViolation(err: unknown): boolean {
   return (
@@ -26,22 +18,16 @@ function isUniqueViolation(err: unknown): boolean {
   );
 }
 
-type RawRow = {
-  id: string;
-  source: string;
-  payload: unknown;
-  processing_attempts?: number;
-};
-
 async function finalizeSuccess(
   supabase: ReturnType<typeof getServiceSupabase>,
   id: string,
-  opts?: { region?: string },
+  opts?: { region?: string; skipReason?: string },
 ) {
   const patch: Record<string, unknown> = {
     processed_at: new Date().toISOString(),
     processing_lock: false,
     processing_error: null,
+    skip_reason: opts?.skipReason ?? null,
   };
   if (opts?.region !== undefined) {
     patch.region = opts.region;
@@ -52,7 +38,7 @@ async function finalizeSuccess(
 
 async function finalizeFailure(
   supabase: ReturnType<typeof getServiceSupabase>,
-  row: RawRow,
+  row: RawRecordRow,
   message: string,
 ) {
   const attempts = row.processing_attempts ?? 0;
@@ -71,79 +57,42 @@ async function finalizeFailure(
 
 async function processOneRow(
   supabase: ReturnType<typeof getServiceSupabase>,
-  row: RawRow,
+  row: RawRecordRow,
 ): Promise<{ promoted: boolean; reason?: string }> {
-  const phoneRaw =
-    typeof row.payload === "object" &&
-    row.payload !== null &&
-    "contact_phone" in row.payload
-      ? String((row.payload as { contact_phone?: unknown }).contact_phone ?? "")
-          .trim()
-      : "";
-
-  if (!phoneRaw) {
-    await finalizeSuccess(supabase, row.id);
-    return { promoted: false, reason: "no_phone" };
+  const handler = resolveVerticalHandler(row.source);
+  if (!handler) {
+    await finalizeSuccess(supabase, row.id, {
+      skipReason: SKIP_REASON_UNKNOWN_VERTICAL,
+    });
+    return { promoted: false, reason: SKIP_REASON_UNKNOWN_VERTICAL };
   }
 
-  const parsed = canadaMortgagePayloadSchema.safeParse(row.payload);
-  if (!parsed.success) {
-    await finalizeSuccess(supabase, row.id);
-    return { promoted: false, reason: "invalid_payload" };
+  const result = handler.qualify(row);
+  if (result.kind === "skip") {
+    await finalizeSuccess(supabase, row.id, {
+      ...(result.region !== undefined ? { region: result.region } : {}),
+      skipReason: result.reason,
+    });
+    return { promoted: false, reason: result.reason };
   }
 
-  const p = parsed.data;
-  const resolvedRegion = resolveRegion({
-    postal_code: p.postal_code,
-    region: p.region,
-  });
+  const { region: resolvedRegion, rowData } = result;
 
-  const purchaseDate = parsePurchaseDate(p.purchase_date);
-  const renewal = renewalDateFromPurchase(purchaseDate);
-  const monthsToRenewal = fullMonthsFromNowTo(renewal);
-  const mortgageBalance = computeMortgageBalance(p.purchase_price);
-  const paymentShock = computePaymentShock(mortgageBalance);
-  const score = computeLeadScore(monthsToRenewal, paymentShock);
-
-  const norm = normalizeLeadData({
-    address: p.address,
-    city: p.city,
-    postal_code: p.postal_code,
-    region: resolvedRegion,
-  });
-
-  if (!shouldPromoteLead(score, monthsToRenewal)) {
-    await finalizeSuccess(supabase, row.id, { region: resolvedRegion });
-    return { promoted: false, reason: "below_threshold" };
-  }
-
-  const contact_phone = p.contact_phone.trim();
   const { data: existing, error: exErr } = await supabase
     .from("leads")
     .select("id, status")
-    .eq("fingerprint", norm.fingerprint)
+    .eq("fingerprint", rowData.fingerprint)
     .maybeSingle();
 
   if (exErr) throw exErr;
 
-  if (existing?.status === "sold") {
-    await finalizeSuccess(supabase, row.id, { region: resolvedRegion });
-    return { promoted: false, reason: "lead_already_sold" };
+  if (existing?.status === LEAD_STATUS_SOLD) {
+    await finalizeSuccess(supabase, row.id, {
+      region: resolvedRegion,
+      skipReason: SKIP_REASON_LEAD_ALREADY_SOLD,
+    });
+    return { promoted: false, reason: SKIP_REASON_LEAD_ALREADY_SOLD };
   }
-
-  const rowData = {
-    fingerprint: norm.fingerprint,
-    contact_phone,
-    address: norm.normalizedAddress,
-    city: norm.normalizedCity,
-    postal_code: norm.normalizedPostalCode,
-    region: norm.region,
-    payment_shock: paymentShock,
-    months_to_renewal: monthsToRenewal,
-    score,
-    status: "available" as const,
-    updated_at: new Date().toISOString(),
-  };
 
   let leadId: string;
 
@@ -167,7 +116,7 @@ async function processOneRow(
 
     const { error: evErr } = await supabase.from("lead_events").insert({
       lead_id: leadId,
-      event_type: "created",
+      event_type: LEAD_EVENT_TYPE_CREATED,
       payload: { raw_record_id: row.id, source: row.source },
       idempotency_key: `promote:${row.id}`,
     });
@@ -185,6 +134,8 @@ export type ProcessBatchResult = {
   errors: Array<{ rawRecordId: string; message: string }>;
 };
 
+const BATCH_LIMIT = 10;
+
 export async function processRawBatch(
   limit: number = BATCH_LIMIT,
 ): Promise<ProcessBatchResult> {
@@ -198,7 +149,7 @@ export async function processRawBatch(
     throw new Error(claimErr.message);
   }
 
-  const rows = (claimed ?? []) as RawRow[];
+  const rows = (claimed ?? []) as RawRecordRow[];
   let promoted = 0;
   let skipped = 0;
   const errors: ProcessBatchResult["errors"] = [];
@@ -213,8 +164,14 @@ export async function processRawBatch(
       errors.push({ rawRecordId: row.id, message });
       try {
         await finalizeFailure(supabase, row, message);
-      } catch {
-        // best-effort
+      } catch (e) {
+        logger.error(
+          JSON.stringify({
+            event: "finalize_skip_reason_failed",
+            rowId: row.id,
+            error: String(e),
+          }),
+        );
       }
     }
   }

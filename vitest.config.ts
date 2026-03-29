@@ -8,7 +8,13 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./tests/setup.ts'],
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx', 'lib/**/__tests__/**/*.test.ts'],
+    include: [
+      'tests/**/*.test.ts',
+      'tests/**/*.test.tsx',
+      'lib/**/__tests__/**/*.test.ts',
+      '__tests__/**/*.test.ts',
+      '__tests__/**/*.test.tsx',
+    ],
     coverage: {
       include: ['lib/**', 'app/api/**'],
       reporter: ['text', 'lcov'],

@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
 
 # next.js
 /.next/
@@ -37,6 +39,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# supabase local query snippets (dashboard exports; not migrations)
+/supabase/snippets/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
@@ -44,3 +49,6 @@ next-env.d.ts
 # local data (backed up to S3; see data/README.md)
 /data/*
 !/data/README.md
+
+# git activity CSV exports (see docs/git-activity-report.md)
+/reports/git-activity/

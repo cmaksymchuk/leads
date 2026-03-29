@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:sentry": "node --env-file=.env.local scripts/test-sentry.mjs",
+    "timesheet:git": "node scripts/git-activity-report.mjs",
     "db:gen-types": "supabase gen types typescript --linked > lib/database.types.ts"
   },
   "dependencies": {
@@ -29,6 +31,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

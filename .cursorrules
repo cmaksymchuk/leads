@@ -9,6 +9,7 @@ scored, and surfaced to buyers. The pipeline is the product; the vertical
 - Never use country names in type names, component names, file names, or copy.
   Wrong: CanadaLeadRow, canada-payload.ts, "Canadian mortgage leads"
   Right: LeadRow, mortgage-payload.ts, "mortgage leads"
+  Exception: internal data pipeline tooling (e.g. python/) may use jurisdiction and city names when they accurately describe the data source or geo filter being processed.
 - Vertical-specific logic lives in lib/processing/verticals/
 - Types are market-agnostic. Market/country is a data field, not a type name.
 
@@ -90,3 +91,199 @@ Never use console.log for errors. Only console.error with a JSON payload.
 - Before any DB command: state what it will do and wait for confirmation.
 - Never push to prod without explicit instruction.
 - Never use country names in generated code, types, or copy.
+- **SR&ED workflow:** During substantive work, maintain `docs/sred/wip-<branch-slug>.md`
+  per "SR&ED contemporaneous notes & commit workflow" below. When the user asks for a
+  commit message or says they are about to commit, compile from that file + diff per
+  that section.
+
+# SR&ED contemporaneous notes & commit workflow (assistant must follow)
+
+Evidence lives in **files**, not chat. Chat is not reliable across sessions.
+
+## WIP note file (one per git branch)
+
+- **Path:** `docs/sred/wip-<branch-slug>.md`
+- **`<branch-slug>`:** output of `git branch --show-current` with each `/` replaced by
+  `-` (e.g. `feature/capture` → `docs/sred/wip-feature-capture.md`).
+- If the file does not exist, **create it** the first time a note below applies.
+- **Do not** put secrets, credentials, or personal data in this file; reference test
+  fixtures or redacted summaries instead.
+
+## When to append notes (during the same session as the work)
+
+While implementing or investigating, **append a new bullet or short subsection** under
+the top-level `## WIP entries` section (create that section if missing) when **any**
+of these occur:
+
+- Technological **uncertainty** (could not decide from docs/patterns alone).
+- A **hypothesis** or planned approach before coding.
+- An approach **tried** and **rejected** or **insufficient** (include why, specifically).
+- A **measurement** or test outcome (or explicitly that measurement was not possible yet).
+- A **non-obvious trade-off** that affects architecture, data integrity, concurrency, or
+  correctness.
+
+**Do not** use this file for routine work that matches "Auto-Disqualify Conditions" in
+the SR&ED rule below unless you add a single line: `- Routine: <one phrase> (no SRED thread).`
+
+**UI / styling-only** changes: no SR&ED narrative; at most one routine line as above.
+
+**Honesty:** Never invent failures or experiments that did not happen. If something was
+not recorded at the time, write `Not recorded in WIP` rather than backfilling fiction.
+
+Use **first person**, **specific** tools/APIs/constraints, and reuse an existing
+**Project Tag** (see SR&ED section) when continuing the same thread of uncertainty.
+
+## When the user asks for a commit message or indicates they are about to commit
+
+1. Read **`docs/sred/wip-<branch-slug>.md`** for the current branch (if present).
+2. Read **`git diff`** (staged if available, else working tree) relevant to the commit.
+3. Write a **conventional commit subject** plus body that summarizes **user-visible /
+   maintainable** changes (not the SR&ED story alone).
+4. Apply the **Mandatory Pre-Check** in the SR&ED section below to the **substantive**
+   technical work in this commit (pipeline, data, concurrency, algorithms — **not** UI-only).
+5. Append **exactly one** SR&ED outcome:
+   - If the full technical log is justified per those rules: include the full
+     **SRED TECHNICAL LOG** (sections 0–8), grounded in **WIP entries + diff**. If WIP
+     lacks a required failure/insufficiency for a full log, use
+     `SRED: Not applicable (routine work)` instead — do not invent.
+   - Else: append a single line:
+     `SRED: Not applicable (routine work)`
+6. **Archive consumed WIP bullets:** Move entries that informed this commit into a
+   `## Archived (YYYY-MM-DD)` section in the **same** file (or delete only if the user
+   asked for a minimal file — default is **archive in place**). Leave `## WIP entries`
+   ready for the next commit.
+
+## Optional human trigger
+
+For a one-shot instruction, the user can run the prompt in
+`.cursor/prompts/commit-from-sred-wip.md`.
+
+# SR&ED Documentation Rule (Audit-Grade, Enforced)
+
+## Mandatory Pre-Check (MUST RUN FIRST)
+
+Before writing anything, determine:
+
+- Was there a technological uncertainty that could NOT be solved using standard documentation or known patterns?
+- Was at least one approach attempted, tested, or proven insufficient?
+- Did this work generate new technical knowledge (not just implementation)?
+
+IF ALL are TRUE:
+→ Write full SRED TECHNICAL LOG
+
+ELSE:
+→ Write exactly:
+SRED: Not applicable (routine work)
+→ DO NOT write any additional SR&ED content
+
+---
+
+## SRED TECHNICAL LOG:
+
+0. **Project Tag**
+- Assign a persistent ID (e.g., AUTH-PERF-01, SCRAPER-ANTI-BOT-02)
+- Reuse this tag across ALL commits related to the same uncertainty
+
+1. **Technological Uncertainty**
+- What specific capability was unknown or unproven?
+- Why could this NOT be solved using standard practice, documentation, or known solutions?
+- What existing approaches/tools were insufficient or failed?
+
+2. **Baseline State**
+- What was the system doing BEFORE this work?
+- Include measurable constraints (latency, error rate, scale limits, cost, reliability)
+
+3. **Hypothesis**
+- What did I believe would resolve the uncertainty?
+- Why did I expect this approach to work?
+
+4. **Experimentation**
+- What EXACT changes were implemented? (algorithms, architecture, queries, infra)
+- What variants or alternatives were tested?
+- What FAILED and WHY? (REQUIRED if any failure occurred)
+
+5. **Results & Evidence**
+- What happened after implementation?
+- Include measurable results where possible (latency, throughput, error rate, cost)
+- Directly compare against baseline
+
+## Comparison Requirement:
+- Results MUST explicitly compare against Baseline State
+- If no comparison is made → the log is invalid
+
+6. **Technological Advancement**
+- What NEW capability or knowledge was gained?
+- How does this reduce uncertainty going forward?
+- Is this reusable beyond this specific task?
+- Field of Science/Tech: Explicitly state the sub-field (e.g., Computer Science - Distributed Systems or Information Technology - Data Privacy).
+
+7. **Continuity (REQUIRED if applicable)**
+- Reference prior related commits or experiments
+- Explain how this builds on previous hypotheses or failures
+
+8. **Effort Indicator (Lightweight)**
+- Relative effort: Low / Medium / High
+- Brief justification (e.g., multiple failed approaches, iterative experimentation, single test)
+
+---
+
+## Critical Rules:
+
+- PRIORITIZE FAILURE: If nothing failed, it is likely NOT SR&ED eligible
+- FAILURE REQUIREMENT: If SRED TECHNICAL LOG is written, it MUST include:
+  - At least one clearly stated failed or insufficient approach
+  - A specific technical reason why it failed
+  - If no failure exists → DO NOT write SR&ED log
+
+- NO GENERIC STATEMENTS: Avoid vague phrases like "improved performance"
+- NO UI WORK: Ignore styling, layout, or marketing content
+- FIRST PERSON ONLY: Use "I investigated", "I tested"
+- BE SPECIFIC: Name tools, libraries, APIs, constraints
+- MINIMUM DETAIL: Each section must contain concrete technical detail (no filler)
+
+---
+
+## Measurement Rule:
+If no measurable metric is included in "Results & Evidence",
+explicitly state why measurement was not possible.
+
+---
+
+## Auto-Disqualify Conditions:
+If the work is ANY of the following, mark "Not applicable":
+- CRUD wiring or basic API usage
+- straightforward implementation from documentation
+- UI/styling changes
+- config-only changes with no uncertainty
+- known pattern implementation without experimentation
+
+---
+
+## Anti-Fluff Enforcement:
+
+Do NOT exaggerate or reframe routine work as experimental.
+
+Disallowed phrases unless supported by evidence:
+- "novel", "advanced", "innovative", "AI-powered", "optimized"
+
+Allowed ONLY if supported by:
+- a clearly stated technical limitation
+- at least one failed or insufficient existing approach
+- measurable constraints or trade-offs
+
+---
+
+## Reframing Rule (Evidence-Based):
+
+When describing work, frame it in terms of:
+
+❌ WHAT was built  
+→ Avoid: "Built X system"
+
+✅ WHAT COULD NOT BE DONE + WHY  
+→ "I could not achieve [specific capability] using [standard approach] due to [technical limitation]"
+
+Then:
+
+→ "I hypothesized [approach] would resolve this by [mechanism]"
+→ "This failed/succeeded because [technical reason]"
