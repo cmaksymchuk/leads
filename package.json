@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:restart": "sh -c 'lsof -tiTCP:3000 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true; pkill -f \"next dev\" 2>/dev/null || true; pkill -f \"next-server\" 2>/dev/null || true; exec npm run dev'",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

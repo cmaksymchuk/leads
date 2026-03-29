@@ -1,4 +1,8 @@
-import { CAPTURE_POLICY_VERSION_MORTGAGE_V1, VERTICAL_MORTGAGE } from "@/lib/capture/constants";
+import {
+  CAPTURE_DISCLOSURE,
+  CAPTURE_POLICY_VERSION_MORTGAGE_V1,
+  VERTICAL_MORTGAGE,
+} from "@/lib/capture/constants";
 import { MORTGAGE_INTENT_PROVINCE_VALUES } from "@/lib/capture/schemas";
 import type {
   CaptureStep,
@@ -110,6 +114,7 @@ function toSerializableSteps(
 
 export const mortgageCaptureConfig: VerticalCaptureConfig = {
   slug: "mortgage",
+  disclosure: CAPTURE_DISCLOSURE,
   title: "Mortgage renewal — get your best rate",
   eyebrow: "Licensed broker network",
   headline: "Your mortgage is renewing.",

@@ -138,10 +138,11 @@ Use **first person**, **specific** tools/APIs/constraints, and reuse an existing
 1. Read **`docs/sred/wip-<branch-slug>.md`** for the current branch (if present).
 2. Read **`git diff`** (staged if available, else working tree) relevant to the commit.
 3. Write a **conventional commit subject** plus body that summarizes **user-visible /
-   maintainable** changes (not the SR&ED story alone).
+   maintainable** changes (not the SR&ED story alone). **This part is mandatory** — the
+   commit message must always describe what changed for humans/reviewers, not only SR&ED.
 4. Apply the **Mandatory Pre-Check** in the SR&ED section below to the **substantive**
    technical work in this commit (pipeline, data, concurrency, algorithms — **not** UI-only).
-5. Append **exactly one** SR&ED outcome:
+5. In the **same** commit message, after the conventional body, append **exactly one** SR&ED outcome:
    - If the full technical log is justified per those rules: include the full
      **SRED TECHNICAL LOG** (sections 0–8), grounded in **WIP entries + diff**. If WIP
      lacks a required failure/insufficiency for a full log, use

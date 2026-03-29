@@ -142,8 +142,10 @@ export function CaptureChat({
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                verticalSlug: config.slug,
-                messages: [] as Array<{ role: string; content: string }>,
+                vertical_id: config.apiVerticalId,
+                messages: [
+                  { role: "user", content: "Hi" },
+                ] as Array<{ role: string; content: string }>,
               }),
             });
             if (cancelled) return;
@@ -158,11 +160,19 @@ export function CaptureChat({
               setChatState("waiting");
               return;
             }
+            const payload = (await res.json()) as {
+              response?: string;
+              guardrail_triggered?: boolean;
+            };
+            const reply =
+              typeof payload.response === "string" && payload.response.length > 0
+                ? payload.response
+                : config.aiModeUnavailableMessage;
             setMessages([
               {
                 id: nextMessageId(),
                 role: "bot",
-                text: config.aiModeUnavailableMessage,
+                text: reply,
               },
             ]);
             setChatState("waiting");
@@ -186,6 +196,97 @@ export function CaptureChat({
       if (outer !== undefined) window.clearTimeout(outer);
     };
   }, [chatMode, config.slug, config.aiModeUnavailableMessage, nextMessageId]);
+
+  const handleAiSend = useCallback(async () => {
+    if (chatMode !== "ai" || chatState !== "waiting") return;
+    const text = inputValue.trim();
+    if (!text) {
+      setInputError("Please enter a message.");
+      return;
+    }
+    if (!consentChecked) {
+      setInputError(null);
+      setLocalError(config.consentRequiredMessage);
+      return;
+    }
+    setInputError(null);
+    setLocalError(null);
+
+    const apiMessages = [
+      ...messages.map((m) => ({
+        role: (m.role === "bot" ? "assistant" : "user") as "assistant" | "user",
+        content: m.text,
+      })),
+      { role: "user" as const, content: text },
+    ];
+
+    const userMsgId = nextMessageId();
+    setMessages((prev) => [...prev, { id: userMsgId, role: "user", text }]);
+    setInputValue("");
+    setChatState("typing");
+
+    try {
+      const res = await fetch("/api/capture/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vertical_id: config.apiVerticalId,
+          messages: apiMessages,
+        }),
+      });
+      const payload = (await res.json()) as {
+        response?: string;
+        guardrail_triggered?: boolean;
+      };
+      if (!res.ok) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextMessageId(),
+            role: "bot",
+            text: config.aiModeUnavailableMessage,
+          },
+        ]);
+        setChatState("waiting");
+        return;
+      }
+      const reply =
+        typeof payload.response === "string" && payload.response.length > 0
+          ? payload.response
+          : config.aiModeUnavailableMessage;
+      setMessages((prev) => [
+        ...prev,
+        { id: nextMessageId(), role: "bot", text: reply },
+      ]);
+      setChatState("waiting");
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextMessageId(),
+          role: "bot",
+          text: config.aiModeUnavailableMessage,
+        },
+      ]);
+      setChatState("waiting");
+    }
+  }, [
+    chatMode,
+    chatState,
+    inputValue,
+    messages,
+    config.apiVerticalId,
+    config.aiModeUnavailableMessage,
+    config.consentRequiredMessage,
+    consentChecked,
+    nextMessageId,
+  ]);
+
+  const onAiComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    e.preventDefault();
+    void handleAiSend();
+  };
 
   function advanceAfterAnswer(
     displayText: string,
@@ -356,6 +457,8 @@ export function CaptureChat({
 
   const showProgress = chatMode === "scripted" && chatState !== "idle";
 
+  const showAiComposer = chatMode === "ai" && chatState === "waiting";
+
   return (
     <div className="flex flex-col gap-4">
       {showProgress && (
@@ -477,6 +580,51 @@ export function CaptureChat({
                 {config.submitButtonLabel}
               </button>
             )}
+          </div>
+          {inputError && (
+            <p className="text-destructive text-sm" role="alert">
+              {inputError}
+            </p>
+          )}
+          {localError && (
+            <p className="text-destructive text-sm" role="alert">
+              {localError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {showAiComposer && (
+        <div className="flex flex-col gap-2">
+          <label className="text-muted-foreground flex cursor-pointer items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={consentChecked}
+              onChange={(e) => {
+                setConsentChecked(e.target.checked);
+                if (e.target.checked) setLocalError(null);
+              }}
+              className="mt-1"
+            />
+            <span>{config.consentText}</span>
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <textarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={onAiComposerKeyDown}
+              placeholder="Type your reply…"
+              rows={3}
+              className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring max-h-40 min-h-[88px] flex-1 resize-y rounded-lg border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+              aria-label="Your message"
+            />
+            <button
+              type="button"
+              onClick={() => void handleAiSend()}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 shrink-0 rounded-lg px-4 py-2 text-sm font-medium"
+            >
+              Send
+            </button>
           </div>
           {inputError && (
             <p className="text-destructive text-sm" role="alert">

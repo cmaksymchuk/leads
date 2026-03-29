@@ -1,0 +1,34 @@
+---
+description: SR&ED WIP log — create or append docs/sred/wip file on feature branches during substantive work
+alwaysApply: true
+---
+
+# SR&ED WIP file (mandatory on feature branches)
+
+When **substantive** work is done on a git branch whose name starts with `feature/` (code, tests, API, pipeline logic — not pure copy/formatting), the agent must **not** rely on chat as the log.
+
+## Branch slug and path
+
+- Run `git branch --show-current`; replace every `/` with `-` → **branch slug**.
+- WIP path: `docs/sred/wip-<branch-slug>.md`
+- If the file is missing, **create it** with a top-level `## WIP entries` section (and a one-line title if helpful).
+
+## When to append
+
+Before considering the task complete for that turn, **append** at least one bullet under `## WIP entries` when any of these occurred in this session (same criteria as `.cursorrules`):
+
+- Technological uncertainty, hypothesis, rejected approach, measurement/test outcome, or non-obvious trade-off.
+
+For **routine** work that matches auto-disqualify in `.cursorrules`, append a single line: `- Routine: <one phrase> (no SRED thread).`
+
+**UI / styling-only** changes: at most one routine line as above; no long narrative.
+
+**Honesty:** Do not invent experiments. If nothing qualified was recorded during the work, write `Not recorded in WIP` once rather than backfilling.
+
+## Do not
+
+- Put secrets, credentials, or personal data in the WIP file.
+
+## Full policy
+
+The complete workflow (commit message, SRED TECHNICAL LOG, archiving) lives in `.cursorrules` under "SR&ED contemporaneous notes & commit workflow".

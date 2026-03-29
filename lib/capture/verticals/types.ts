@@ -17,6 +17,8 @@ export interface CaptureStepWithValidation extends CaptureStep {
 
 export interface VerticalCaptureConfig {
   slug: string;
+  /** Prominent disclosure above the chat (AI and scripted). */
+  disclosure: string;
   title: string;
   /** Small line above headline (optional). */
   eyebrow?: string;
@@ -31,7 +33,7 @@ export interface VerticalCaptureConfig {
   successMessage: string;
   /** Shown when POST /api/capture fails; user can retry. */
   submissionErrorBotMessage: string;
-  /** Shown when NEXT_PUBLIC_CHAT_MODE=ai and the chat API is not ready. */
+  /** Shown when capture chat mode is `ai` and the chat API is not ready. */
   aiModeUnavailableMessage: string;
   /** Chat card header line (e.g. assistant name). */
   chatCardTitle: string;

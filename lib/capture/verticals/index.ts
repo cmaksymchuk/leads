@@ -19,6 +19,15 @@ export function getVerticalConfig(slug: string): VerticalCaptureConfig | null {
   return registry[slug] ?? null;
 }
 
+export function getVerticalCaptureConfigByApiVerticalId(
+  apiVerticalId: string,
+): VerticalCaptureConfig | null {
+  for (const config of Object.values(registry)) {
+    if (config.apiVerticalId === apiVerticalId) return config;
+  }
+  return null;
+}
+
 export function getVerticalValidators(
   slug: string,
 ): Record<string, (value: string) => string | null> {

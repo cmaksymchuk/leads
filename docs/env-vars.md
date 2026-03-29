@@ -2,7 +2,9 @@
 
 | Variable | Required | Environments | Purpose |
 |---|---|---|---|
-| NEXT_PUBLIC_CHAT_MODE | No | All | Lead capture UI: `scripted` (default step flow) or `ai` (stub; posts to `/api/capture/chat`). |
+| NEXT_PUBLIC_CHAT_MODE | No | All | Lead capture UI: `scripted` (default step flow) or `ai` (posts to `/api/capture/chat`). Read via runtime env on the server (see `lib/capture/chat-mode.ts`). |
+| CAPTURE_CHAT_MODE | No | Server only | Same values as `NEXT_PUBLIC_CHAT_MODE` (`scripted` \| `ai`). When non-empty, wins on the server. Prefer this for local `next dev` with Turbopack if `NEXT_PUBLIC_CHAT_MODE` is not picked up. |
+| ANTHROPIC_API_KEY | Yes (AI mode) | Server only | Claude Haiku for `/api/capture/chat` when capture chat mode is `ai`. Omit if AI capture is unused. |
 | NEXT_PUBLIC_SUPABASE_URL | Yes | All | Supabase project URL |
 | SUPABASE_SERVICE_ROLE_KEY | Yes | Server only | Supabase admin access |
 | LEADFLOW_HMAC_SECRET | Yes | All | Signs /api/process-raw requests |

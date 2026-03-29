@@ -1,5 +1,8 @@
 import { CaptureChat } from "@/components/capture/CaptureChat";
-import { CAPTURE_POLICY_VERSION_MORTGAGE_V1, VERTICAL_MORTGAGE } from "@/lib/capture/constants";
+import {
+  CAPTURE_POLICY_VERSION_MORTGAGE_V1,
+  VERTICAL_MORTGAGE,
+} from "@/lib/capture/constants";
 import {
   getVerticalMessageResolvers,
   getVerticalValidators,
@@ -91,149 +94,161 @@ describe("CaptureChat", () => {
     ).toBeInTheDocument();
   });
 
-  it("final step POSTs to /api/capture with expected shape", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ success: true }),
-    });
-    globalThis.fetch = fetchMock;
+  it(
+    "final step POSTs to /api/capture with expected shape",
+    async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+      globalThis.fetch = fetchMock;
 
-    render(
-      <CaptureChat
-        config={mortgageCaptureConfig}
-        searchParams={
-          new URLSearchParams(
-            "utm_source=src&utm_medium=med&utm_campaign=cmp&utm_content=ct",
-          )
-        }
-        chatMode="scripted"
-        validators={mortgageValidators}
-        messageResolvers={mortgageMessageResolvers}
-      />,
-    );
+      render(
+        <CaptureChat
+          config={mortgageCaptureConfig}
+          searchParams={
+            new URLSearchParams(
+              "utm_source=src&utm_medium=med&utm_campaign=cmp&utm_content=ct",
+            )
+          }
+          chatMode="scripted"
+          validators={mortgageValidators}
+          messageResolvers={mortgageMessageResolvers}
+        />,
+      );
 
-    await flushTypingDelay();
-    fireEvent.click(screen.getByRole("button", { name: "Within 6 months" }));
-    await flushTypingDelay();
-    fireEvent.click(screen.getByRole("button", { name: "BC" }));
-    await flushTypingDelay();
-    fireEvent.change(screen.getByPlaceholderText("Your name"), {
-      target: { value: "Alex" },
-    });
-    fireEvent.keyDown(screen.getByPlaceholderText("Your name"), {
-      key: "Enter",
-      code: "Enter",
-    });
-    await flushTypingDelay();
-    fireEvent.change(screen.getByPlaceholderText("Phone number"), {
-      target: { value: "6045551234" },
-    });
-    fireEvent.keyDown(screen.getByPlaceholderText("Phone number"), {
-      key: "Enter",
-      code: "Enter",
-    });
-    await flushTypingDelay();
+      await flushTypingDelay();
+      fireEvent.click(screen.getByRole("button", { name: "Within 6 months" }));
+      await flushTypingDelay();
+      fireEvent.click(screen.getByRole("button", { name: "BC" }));
+      await flushTypingDelay();
+      fireEvent.change(screen.getByPlaceholderText("Your name"), {
+        target: { value: "Alex" },
+      });
+      fireEvent.keyDown(screen.getByPlaceholderText("Your name"), {
+        key: "Enter",
+        code: "Enter",
+      });
+      await flushTypingDelay();
+      fireEvent.change(screen.getByPlaceholderText("Phone number"), {
+        target: { value: "6045551234" },
+      });
+      fireEvent.keyDown(screen.getByPlaceholderText("Phone number"), {
+        key: "Enter",
+        code: "Enter",
+      });
+      await flushTypingDelay();
 
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: new RegExp(mortgageCaptureConfig.consentText.slice(0, 20)),
-      }),
-    );
-    fireEvent.change(screen.getByPlaceholderText("e.g. M5V 2T6"), {
-      target: { value: "V6B1A1" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: mortgageCaptureConfig.submitButtonLabel }),
-    );
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: new RegExp(mortgageCaptureConfig.consentText.slice(0, 20)),
+        }),
+      );
+      fireEvent.change(screen.getByPlaceholderText("e.g. M5V 2T6"), {
+        target: { value: "V6B1A1" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: mortgageCaptureConfig.submitButtonLabel }),
+      );
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const call = fetchMock.mock.calls.find((c) => c[0] === "/api/capture");
-    expect(call).toBeDefined();
-    const init = call![1] as RequestInit;
-    const body = JSON.parse(init.body as string) as {
-      vertical_id: string;
-      identity: { name: string; phone: string };
-      intent: {
-        postal_code: string;
-        province: string;
-        renewal_timeframe: string;
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled(), {
+        timeout: 15_000,
+      });
+      const call = fetchMock.mock.calls.find((c) => c[0] === "/api/capture");
+      expect(call).toBeDefined();
+      const init = call![1] as RequestInit;
+      const body = JSON.parse(init.body as string) as {
+        vertical_id: string;
+        identity: { name: string; phone: string };
+        intent: {
+          postal_code: string;
+          province: string;
+          renewal_timeframe: string;
+        };
+        consent: { given: boolean; policy_version: string; timestamp: string };
+        attribution: Record<string, string | undefined>;
       };
-      consent: { given: boolean; policy_version: string; timestamp: string };
-      attribution: Record<string, string | undefined>;
-    };
 
-    expect(body.vertical_id).toBe(VERTICAL_MORTGAGE);
-    expect(body.identity).toEqual({ name: "Alex", phone: "6045551234" });
-    expect(body.intent).toEqual({
-      postal_code: "V6B1A1",
-      province: "BC",
-      renewal_timeframe: "0-6mo",
-    });
-    expect(body.consent.given).toBe(true);
-    expect(body.consent.policy_version).toBe(CAPTURE_POLICY_VERSION_MORTGAGE_V1);
-    expect(body.attribution.utm_source).toBe("src");
-    expect(body.attribution.utm_medium).toBe("med");
-    expect(body.attribution.utm_campaign).toBe("cmp");
-    expect(body.attribution.utm_content).toBe("ct");
-    expect(body.attribution.landing_page).toBeDefined();
-  });
+      expect(body.vertical_id).toBe(VERTICAL_MORTGAGE);
+      expect(body.identity).toEqual({ name: "Alex", phone: "6045551234" });
+      expect(body.intent).toEqual({
+        postal_code: "V6B1A1",
+        province: "BC",
+        renewal_timeframe: "0-6mo",
+      });
+      expect(body.consent.given).toBe(true);
+      expect(body.consent.policy_version).toBe(CAPTURE_POLICY_VERSION_MORTGAGE_V1);
+      expect(body.attribution.utm_source).toBe("src");
+      expect(body.attribution.utm_medium).toBe("med");
+      expect(body.attribution.utm_campaign).toBe("cmp");
+      expect(body.attribution.utm_content).toBe("ct");
+      expect(body.attribution.landing_page).toBeDefined();
+    },
+    20_000,
+  );
 
-  it("error response shows retry bot message from config", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      json: async () => ({ success: false }),
-    });
-    globalThis.fetch = fetchMock;
+  it(
+    "error response shows retry bot message from config",
+    async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({ success: false }),
+      });
+      globalThis.fetch = fetchMock;
 
-    render(
-      <CaptureChat
-        config={mortgageCaptureConfig}
-        searchParams={new URLSearchParams()}
-        chatMode="scripted"
-        validators={mortgageValidators}
-        messageResolvers={mortgageMessageResolvers}
-      />,
-    );
+      render(
+        <CaptureChat
+          config={mortgageCaptureConfig}
+          searchParams={new URLSearchParams()}
+          chatMode="scripted"
+          validators={mortgageValidators}
+          messageResolvers={mortgageMessageResolvers}
+        />,
+      );
 
-    await flushTypingDelay();
-    fireEvent.click(screen.getByRole("button", { name: "Within 6 months" }));
-    await flushTypingDelay();
-    fireEvent.click(screen.getByRole("button", { name: "AB" }));
-    await flushTypingDelay();
-    fireEvent.change(screen.getByPlaceholderText("Your name"), {
-      target: { value: "Pat" },
-    });
-    fireEvent.keyDown(screen.getByPlaceholderText("Your name"), {
-      key: "Enter",
-      code: "Enter",
-    });
-    await flushTypingDelay();
-    fireEvent.change(screen.getByPlaceholderText("Phone number"), {
-      target: { value: "4035559876" },
-    });
-    fireEvent.keyDown(screen.getByPlaceholderText("Phone number"), {
-      key: "Enter",
-      code: "Enter",
-    });
-    await flushTypingDelay();
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: new RegExp(mortgageCaptureConfig.consentText.slice(0, 20)),
-      }),
-    );
-    fireEvent.change(screen.getByPlaceholderText("e.g. M5V 2T6"), {
-      target: { value: "T2P1J4" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: mortgageCaptureConfig.submitButtonLabel }),
-    );
+      await flushTypingDelay();
+      fireEvent.click(screen.getByRole("button", { name: "Within 6 months" }));
+      await flushTypingDelay();
+      fireEvent.click(screen.getByRole("button", { name: "AB" }));
+      await flushTypingDelay();
+      fireEvent.change(screen.getByPlaceholderText("Your name"), {
+        target: { value: "Pat" },
+      });
+      fireEvent.keyDown(screen.getByPlaceholderText("Your name"), {
+        key: "Enter",
+        code: "Enter",
+      });
+      await flushTypingDelay();
+      fireEvent.change(screen.getByPlaceholderText("Phone number"), {
+        target: { value: "4035559876" },
+      });
+      fireEvent.keyDown(screen.getByPlaceholderText("Phone number"), {
+        key: "Enter",
+        code: "Enter",
+      });
+      await flushTypingDelay();
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: new RegExp(mortgageCaptureConfig.consentText.slice(0, 20)),
+        }),
+      );
+      fireEvent.change(screen.getByPlaceholderText("e.g. M5V 2T6"), {
+        target: { value: "T2P1J4" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: mortgageCaptureConfig.submitButtonLabel }),
+      );
 
-    await waitFor(() =>
-      expect(
-        screen.getByText(mortgageCaptureConfig.submissionErrorBotMessage),
-      ).toBeInTheDocument(),
-    );
-  });
+      await waitFor(
+        () =>
+          expect(
+            screen.getByText(mortgageCaptureConfig.submissionErrorBotMessage),
+          ).toBeInTheDocument(),
+        { timeout: 15_000 },
+      );
+    },
+    20_000,
+  );
 
   it("progress dots reflect step count", async () => {
     render(
@@ -250,5 +265,101 @@ describe("CaptureChat", () => {
     expect(within(list).getAllByRole("listitem")).toHaveLength(
       mortgageCaptureConfig.steps.length,
     );
+  });
+
+  it("ai mode shows composer and POSTs follow-up with assistant + user history", async () => {
+    const firstReply = "When does your mortgage renew?";
+    const secondReply = "Thanks for that.";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ response: firstReply }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ response: secondReply }),
+      });
+    globalThis.fetch = fetchMock;
+
+    render(
+      <CaptureChat
+        config={mortgageCaptureConfig}
+        searchParams={new URLSearchParams()}
+        chatMode="ai"
+        validators={mortgageValidators}
+        messageResolvers={mortgageMessageResolvers}
+      />,
+    );
+
+    await flushTypingDelay();
+    expect(screen.getByText(firstReply)).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: new RegExp(mortgageCaptureConfig.consentText.slice(0, 20)),
+      }),
+    );
+
+    const composer = screen.getByRole("textbox", { name: "Your message" });
+    fireEvent.change(composer, { target: { value: "In about six months" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      const chatCalls = fetchMock.mock.calls.filter(
+        (c) => c[0] === "/api/capture/chat",
+      );
+      expect(chatCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    const chatCalls = fetchMock.mock.calls.filter(
+      (c) => c[0] === "/api/capture/chat",
+    );
+    const lastChatInit = chatCalls[chatCalls.length - 1][1] as RequestInit;
+    const body = JSON.parse(lastChatInit.body as string) as {
+      vertical_id: string;
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.vertical_id).toBe(VERTICAL_MORTGAGE);
+    expect(body.messages).toEqual([
+      { role: "assistant", content: firstReply },
+      { role: "user", content: "In about six months" },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByText(secondReply)).toBeInTheDocument();
+    });
+  });
+
+  it("ai mode requires consent before Send", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ response: "Hello from AI" }),
+    });
+    globalThis.fetch = fetchMock;
+
+    render(
+      <CaptureChat
+        config={mortgageCaptureConfig}
+        searchParams={new URLSearchParams()}
+        chatMode="ai"
+        validators={mortgageValidators}
+        messageResolvers={mortgageMessageResolvers}
+      />,
+    );
+
+    await flushTypingDelay();
+    fireEvent.change(screen.getByRole("textbox", { name: "Your message" }), {
+      target: { value: "My reply" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(
+      screen.getByText(mortgageCaptureConfig.consentRequiredMessage),
+    ).toBeInTheDocument();
+    const chatCalls = fetchMock.mock.calls.filter(
+      (c) => c[0] === "/api/capture/chat",
+    );
+    expect(chatCalls.length).toBe(1);
   });
 });

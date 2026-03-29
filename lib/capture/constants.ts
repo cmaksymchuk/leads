@@ -1,3 +1,7 @@
+/** Shown on capture pages above the chat; not legal advice. */
+export const CAPTURE_DISCLOSURE =
+  "We are not a mortgage broker or financial advisor. We connect you with licensed brokers who will contact you directly.";
+
 /** Mortgage vertical id (POST /api/capture body.vertical_id). */
 export const VERTICAL_MORTGAGE = "mortgage" as const;
 

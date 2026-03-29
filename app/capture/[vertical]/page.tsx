@@ -77,6 +77,15 @@ export default async function CapturePage({ params }: PageProps) {
         ))}
       </section>
 
+      {config.disclosure ? (
+        <p
+          className="border-border bg-muted/40 text-foreground rounded-xl border px-4 py-3 text-center text-sm leading-relaxed"
+          role="note"
+        >
+          {config.disclosure}
+        </p>
+      ) : null}
+
       <section className="border-border bg-card rounded-2xl border shadow-sm">
         <div className="border-border flex items-center gap-3 border-b px-4 py-3">
           <span
